@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { UserRole } from "@/types";
+import { loadJson, saveJson } from "@/utils/storage";
 
 interface UiState {
   role: UserRole;
@@ -15,7 +16,7 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
-  role: "operator",
+  role: loadJson("role", "operator") as UserRole,
   sidebarCollapsed: false,
   modalStack: [],
   toast: null,
@@ -44,3 +45,5 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   hideToast: () => set({ toast: null }),
 }));
+
+useUiStore.subscribe((s) => saveJson("role", s.role));

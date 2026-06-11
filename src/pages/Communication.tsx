@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Search,
   MessageSquareText,
@@ -38,11 +38,21 @@ export default function Communication() {
   const activeId = useCommunicationStore((s) => s.activeId);
   const setActive = useCommunicationStore((s) => s.setActive);
   const markAsRead = useCommunicationStore((s) => s.markAsRead);
-  const getActive = useCommunicationStore((s) => s.getActive);
-  const getActiveMessages = useCommunicationStore((s) => s.getActiveMessages);
+  const messages = useCommunicationStore((s) => s.messages);
   const sendMessage = useCommunicationStore((s) => s.sendMessage);
   const showToast = useUiStore((s) => s.showToast);
   const role = useUiStore((s) => s.role);
+
+  const active = useMemo(
+    () => communications.find((c) => c.id === activeId),
+    [communications, activeId]
+  );
+  const activeMessages = useMemo(() => {
+    if (!activeId) return [];
+    return messages
+      .filter((m) => m.communicationId === activeId)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  }, [messages, activeId]);
 
   const [keyword, setKeyword] = useState("");
   const [typeFilter, setTypeFilter] = useState<MessageType | "all">("all");
@@ -50,8 +60,7 @@ export default function Communication() {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const active = getActive();
-  const messages = getActiveMessages().filter((m) =>
+  const filteredMessages = activeMessages.filter((m) =>
     typeFilter === "all" ? true : m.type === typeFilter
   );
 
@@ -61,7 +70,7 @@ export default function Communication() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length, activeId]);
+  }, [filteredMessages.length, activeId]);
 
   const handleSelect = (id: string) => {
     setActive(id);
@@ -266,7 +275,7 @@ export default function Communication() {
                 </span>
               </div>
 
-              {messages.length === 0 ? (
+              {filteredMessages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
                   <div className="text-center">
                     <MessageSquareText size={40} className="mx-auto text-ink-200 mb-2" />
@@ -274,7 +283,7 @@ export default function Communication() {
                   </div>
                 </div>
               ) : (
-                messages.map((m, idx) => (
+                filteredMessages.map((m, idx) => (
                   <MessageBubble
                     key={m.id}
                     message={m}

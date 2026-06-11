@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import type { Product } from "@/types";
+import type { Product, SampleField } from "@/types";
 import { PRODUCTS } from "@/data/products";
+import { loadJson, saveJson } from "@/utils/storage";
 
 interface ProductState {
   products: Product[];
   compareIds: string[];
   getById: (id: string) => Product | undefined;
+  addProduct: (payload: Omit<Product, "id" | "createdAt" | "favorite" | "rating" | "dealsCount">) => void;
   toggleFavorite: (id: string) => void;
   toggleCompare: (id: string) => void;
   clearCompare: () => void;
@@ -20,10 +22,25 @@ interface ProductState {
 }
 
 export const useProductStore = create<ProductState>((set, get) => ({
-  products: PRODUCTS,
-  compareIds: [],
+  products: loadJson("products", PRODUCTS),
+  compareIds: loadJson("compareIds", [] as string[]),
 
   getById: (id) => get().products.find((p) => p.id === id),
+
+  addProduct: (payload) =>
+    set((state) => ({
+      products: [
+        {
+          ...payload,
+          id: `p_${Date.now().toString(36)}`,
+          createdAt: new Date().toISOString(),
+          favorite: false,
+          rating: 0,
+          dealsCount: 0,
+        },
+        ...state.products,
+      ],
+    })),
 
   toggleFavorite: (id) =>
     set((state) => ({
@@ -62,3 +79,6 @@ export const useProductStore = create<ProductState>((set, get) => ({
     return list;
   },
 }));
+
+useProductStore.subscribe((s) => saveJson("products", s.products));
+useProductStore.subscribe((s) => saveJson("compareIds", s.compareIds));

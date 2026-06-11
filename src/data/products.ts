@@ -57,6 +57,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.8,
     dealsCount: 86,
     coverage: "全国5000万+企业",
+    updateFrequency: "每月更新",
   },
   {
     id: "p_002",
@@ -76,6 +77,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.6,
     dealsCount: 34,
     coverage: "长三角2.3亿居民",
+    updateFrequency: "每季度更新",
   },
   {
     id: "p_003",
@@ -95,6 +97,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.9,
     dealsCount: 52,
     coverage: "大湾区9+2城市",
+    updateFrequency: "实时/流式",
   },
   {
     id: "p_004",
@@ -114,6 +117,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.5,
     dealsCount: 28,
     coverage: "京津冀8000万消费者",
+    updateFrequency: "每周更新",
   },
   {
     id: "p_005",
@@ -139,6 +143,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.7,
     dealsCount: 20,
     coverage: "成渝3省20+地市",
+    updateFrequency: "每月更新",
   },
   {
     id: "p_006",
@@ -164,6 +169,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.4,
     dealsCount: 16,
     coverage: "147所双一流高校",
+    updateFrequency: "每季度更新",
   },
   {
     id: "p_007",
@@ -189,6 +195,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.3,
     dealsCount: 12,
     coverage: "300万规上工业企业",
+    updateFrequency: "每月更新",
   },
   {
     id: "p_008",
@@ -214,5 +221,6 @@ export const PRODUCTS: Product[] = [
     rating: 4.2,
     dealsCount: 9,
     coverage: "主流媒体全平台",
+    updateFrequency: "每日更新",
   },
 ];

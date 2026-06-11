@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Demand, DemandStatus } from "@/types";
 import { DEMANDS } from "@/data/demands";
+import { loadJson, saveJson } from "@/utils/storage";
 
 interface DemandState {
   demands: Demand[];
@@ -14,7 +15,7 @@ interface DemandState {
 }
 
 export const useDemandStore = create<DemandState>((set, get) => ({
-  demands: DEMANDS,
+  demands: loadJson("demands", DEMANDS),
 
   getById: (id) => get().demands.find((d) => d.id === id),
 
@@ -67,3 +68,5 @@ export const useDemandStore = create<DemandState>((set, get) => ({
     );
   },
 }));
+
+useDemandStore.subscribe((s) => saveJson("demands", s.demands));

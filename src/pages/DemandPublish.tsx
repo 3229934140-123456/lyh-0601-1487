@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useUiStore } from "@/store/useUiStore";
+import { useNavigate } from "react-router-dom";
+import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { DemandStatus, Demand } from "@/types";
 import { INDUSTRIES, REGIONS, UPDATE_FREQUENCIES, DEMAND_STATUS_META } from "@/utils/constants";
@@ -41,6 +43,8 @@ export default function DemandPublish() {
   const addDemand = useDemandStore((s) => s.addDemand);
   const closeDemand = useDemandStore((s) => s.closeDemand);
   const showToast = useUiStore((s) => s.showToast);
+  const findOrCreateByDemand = useCommunicationStore((s) => s.findOrCreateByDemand);
+  const navigate = useNavigate();
 
   const stats = useMemo(() => {
     return demands.reduce(
@@ -465,7 +469,13 @@ export default function DemandPublish() {
                   </>
                 )}
               </button>
-              <button className="btn-mint">
+              <button
+                onClick={() => {
+                  const comm = findOrCreateByDemand(selectedDemand.id, selectedDemand.title);
+                  navigate("/communication");
+                }}
+                className="btn-mint"
+              >
                 <MessageSquare size={16} />
                 进入沟通
               </button>

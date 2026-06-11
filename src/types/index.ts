@@ -46,6 +46,7 @@ export interface Product {
   rating: number;
   dealsCount: number;
   coverage: string;
+  updateFrequency: string;
 }
 
 export interface Intention {
@@ -105,6 +106,7 @@ export interface MatchResult {
   product: Product;
   matchScore: number;
   dimensionScores: DimensionScore[];
+  timelinessNote?: string;
   reportGenerated?: boolean;
 }
 
@@ -116,6 +118,7 @@ export interface MatchReport {
   dimensionScores: DimensionScore[];
   summary: string;
   recommendations: string[];
+  timelinessNote?: string;
   generatedBy: string;
   createdAt: string;
 }

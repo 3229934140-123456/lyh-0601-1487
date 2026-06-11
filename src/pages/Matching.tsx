@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   SlidersHorizontal,
   Sparkles,
@@ -19,10 +20,12 @@ import {
   Share2,
   ThumbsUp,
   Lightbulb,
+  Handshake,
 } from "lucide-react";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useProductStore } from "@/store/useProductStore";
 import { useUiStore } from "@/store/useUiStore";
+import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { MatchScoreRing } from "@/components/MatchScoreRing";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { MatchReport, MatchResult } from "@/types";
@@ -38,6 +41,8 @@ export default function Matching() {
   );
   const products = useProductStore((s) => s.products);
   const showToast = useUiStore((s) => s.showToast);
+  const navigate = useNavigate();
+  const { findOrCreateByDemand, sendMessage } = useCommunicationStore();
 
   const [selectedDemandId, setSelectedDemandId] = useState<string>(demands[0]?.id ?? "");
   const [industry, setIndustry] = useState("");
@@ -55,7 +60,7 @@ export default function Matching() {
     const pr = PRICE_RANGES[priceIdx];
     return products
       .map((product) => {
-        const { matchScore, dimensionScores } = calculateMatch(selectedDemand, product);
+        const { matchScore, dimensionScores, timelinessNote } = calculateMatch(selectedDemand, product);
         return {
           id: `${selectedDemand.id}_${product.id}`,
           demandId: selectedDemand.id,
@@ -64,15 +69,17 @@ export default function Matching() {
           product,
           matchScore,
           dimensionScores,
+          timelinessNote,
         };
       })
       .filter((r) => r.matchScore >= minScore)
       .filter((r) => (industry ? r.product.industry === industry : true))
       .filter((r) => (region ? r.product.region === region : true))
+      .filter((r) => (timeliness ? r.product.updateFrequency === timeliness : true))
       .filter((r) => (pr.min === 0 && pr.max === Infinity ? true : r.product.price >= pr.min && r.product.price <= pr.max))
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 20);
-  }, [selectedDemand, products, industry, region, priceIdx, minScore]);
+  }, [selectedDemand, products, industry, region, timeliness, priceIdx, minScore]);
 
   const stats = useMemo(() => {
     if (results.length === 0) return { high: 0, mid: 0, low: 0, avg: 0 };
@@ -88,8 +95,8 @@ export default function Matching() {
   const selectedResult = useMemo(() => results[0], [results]);
 
   const handleGenerateReport = (r: MatchResult) => {
-    const { matchScore, dimensionScores } = calculateMatch(r.demand, r.product);
-    const rep = generateMatchReport(r.demand, r.product, { matchScore, dimensionScores });
+    const result = calculateMatch(r.demand, r.product);
+    const rep = generateMatchReport(r.demand, r.product, result);
     setReport(rep);
     showToast("success", "撮合报告生成成功！");
   };
@@ -372,6 +379,11 @@ export default function Matching() {
                           style={{ width: `${d.score}%` }}
                         />
                       </div>
+                      {d.name === "timeliness" && selectedResult.timelinessNote && (
+                        <div className="text-[11px] text-ink-500 mt-1 flex items-center gap-1">
+                          <Clock size={11} /> {selectedResult.timelinessNote}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -385,6 +397,29 @@ export default function Matching() {
                 >
                   <Sparkles size={16} />
                   生成撮合报告
+                </button>
+                <button
+                  onClick={() => {
+                    const comm = findOrCreateByDemand(
+                      selectedResult.demandId,
+                      selectedResult.demand.title,
+                      selectedResult.productId,
+                      selectedResult.product.name,
+                      selectedResult.product.providerCompany
+                    );
+                    sendMessage({
+                      communicationId: comm.id,
+                      sender: "当前用户",
+                      senderRole: "operator",
+                      type: "intention",
+                      content: `针对需求「${selectedResult.demand.title}」与产品「${selectedResult.product.name}」发起撮合意向，匹配度 ${selectedResult.matchScore} 分`,
+                    });
+                    navigate("/communication");
+                  }}
+                  className="btn-outline"
+                >
+                  <Handshake size={16} />
+                  发起意向
                 </button>
                 <button className="btn-outline">
                   <Share2 size={16} />
@@ -486,6 +521,17 @@ export default function Matching() {
                   ))}
                 </div>
               </div>
+
+              {report.timelinessNote && (
+                <div>
+                  <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Clock size={12} /> 时效说明
+                  </div>
+                  <p className="text-sm text-ink-700 leading-relaxed p-4 rounded-xl bg-gradient-to-br from-blue-50/70 to-white border border-blue-100">
+                    {report.timelinessNote}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">

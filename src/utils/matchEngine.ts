@@ -50,7 +50,8 @@ function scoreTimeliness(demand: Demand, product: Product): number {
     "实时/流式",
   ];
   const demandIdx = order.indexOf(demand.updateFrequency);
-  const productIdx = order.indexOf("每周更新");
+  const productIdx = order.indexOf(product.updateFrequency);
+  if (demandIdx === -1 || productIdx === -1) return 50;
   const diff = Math.abs(demandIdx - productIdx);
   if (diff === 0) return 100;
   if (diff === 1) return 85;
@@ -79,6 +80,7 @@ function scorePrice(demand: Demand, product: Product): number {
 export interface MatchEngineResult {
   matchScore: number;
   dimensionScores: DimensionScore[];
+  timelinessNote?: string;
 }
 
 export function calculateMatch(demand: Demand, product: Product): MatchEngineResult {
@@ -86,6 +88,20 @@ export function calculateMatch(demand: Demand, product: Product): MatchEngineRes
   const region = scoreRegion(demand, product);
   const timeliness = scoreTimeliness(demand, product);
   const price = scorePrice(demand, product);
+
+  let timelinessNote: string | undefined;
+  const order = ["一次性交付","每季度更新","每月更新","每周更新","每日更新","实时/流式"];
+  const dIdx = order.indexOf(demand.updateFrequency);
+  const pIdx = order.indexOf(product.updateFrequency);
+  if (dIdx !== -1 && pIdx !== -1) {
+    if (pIdx > dIdx) {
+      timelinessNote = `产品时效（${product.updateFrequency}）高于需求（${demand.updateFrequency}），满足且有余量`;
+    } else if (pIdx === dIdx) {
+      timelinessNote = `产品时效（${product.updateFrequency}）与需求完全一致`;
+    } else {
+      timelinessNote = `产品时效（${product.updateFrequency}）低于需求（${demand.updateFrequency}），可能无法满足实时性要求`;
+    }
+  }
 
   const dimensionScores: DimensionScore[] = [
     { name: "industry", label: "行业匹配", score: industry, weight: WEIGHTS.industry },
@@ -101,11 +117,11 @@ export function calculateMatch(demand: Demand, product: Product): MatchEngineRes
       price * WEIGHTS.price
   );
 
-  return { matchScore, dimensionScores };
+  return { matchScore, dimensionScores, timelinessNote };
 }
 
 export function generateMatchReport(demand: Demand, product: Product, result: MatchEngineResult) {
-  const { matchScore, dimensionScores } = result;
+  const { matchScore, dimensionScores, timelinessNote } = result;
   let summary = "";
   const recommendations: string[] = [];
 
@@ -145,6 +161,7 @@ export function generateMatchReport(demand: Demand, product: Product, result: Ma
     dimensionScores,
     summary,
     recommendations,
+    timelinessNote,
     generatedBy: "系统撮合引擎",
     createdAt: new Date().toISOString(),
   };

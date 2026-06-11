@@ -2,14 +2,13 @@ import { create } from "zustand";
 import type { Communication, Message, MessageAttachment } from "@/types";
 import { COMMUNICATIONS, MESSAGES } from "@/data/communications";
 import { uid } from "@/utils/formatters";
+import { loadJson, saveJson } from "@/utils/storage";
 
 interface CommunicationState {
   communications: Communication[];
   messages: Message[];
   activeId: string | null;
   setActive: (id: string | null) => void;
-  getActive: () => Communication | undefined;
-  getActiveMessages: () => Message[];
   markAsRead: (id: string) => void;
   sendMessage: (params: {
     communicationId: string;
@@ -27,26 +26,16 @@ interface CommunicationState {
     partyA: string;
     partyB: string;
   }) => Communication;
+  findOrCreateByDemand: (demandId: string, demandTitle: string, productId?: string, productName?: string, partyB?: string) => Communication;
+  findByDemandAndProduct: (demandId: string, productId: string) => Communication | undefined;
 }
 
 export const useCommunicationStore = create<CommunicationState>((set, get) => ({
-  communications: COMMUNICATIONS,
-  messages: MESSAGES,
-  activeId: COMMUNICATIONS[0]?.id ?? null,
+  communications: loadJson("communications", COMMUNICATIONS),
+  messages: loadJson("messages", MESSAGES),
+  activeId: loadJson("communications", COMMUNICATIONS)[0]?.id ?? null,
 
   setActive: (id) => set({ activeId: id }),
-
-  getActive: () =>
-    get().communications.find((c) => c.id === get().activeId),
-
-  getActiveMessages: () => {
-    const id = get().activeId;
-    return id
-      ? get()
-          .messages.filter((m) => m.communicationId === id)
-          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-      : [];
-  },
 
   markAsRead: (id) =>
     set((state) => ({
@@ -92,4 +81,29 @@ export const useCommunicationStore = create<CommunicationState>((set, get) => ({
     }));
     return newItem;
   },
+
+  findByDemandAndProduct: (demandId, productId) => {
+    return get().communications.find(
+      (c) => c.demandId === demandId && c.productId === productId
+    );
+  },
+
+  findOrCreateByDemand: (demandId, demandTitle, productId, productName, partyB) => {
+    const existing = get().communications.find((c) => c.demandId === demandId);
+    if (existing) {
+      set({ activeId: existing.id });
+      return existing;
+    }
+    return get().createCommunication({
+      demandId,
+      productId: productId ?? "",
+      demandTitle,
+      productName: productName ?? "",
+      partyA: "当前用户",
+      partyB: partyB ?? "待确认",
+    });
+  },
 }));
+
+useCommunicationStore.subscribe((s) => saveJson("communications", s.communications));
+useCommunicationStore.subscribe((s) => saveJson("messages", s.messages));

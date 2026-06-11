@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Star,
   StarOff,
@@ -19,12 +20,35 @@ import {
   Sparkles,
   Handshake,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { useProductStore } from "@/store/useProductStore";
+import { useDemandStore } from "@/store/useDemandStore";
+import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { useUiStore } from "@/store/useUiStore";
 import type { Product } from "@/types";
-import { INDUSTRIES, REGIONS, DELIVERY_FORMS, PRICE_RANGES } from "@/utils/constants";
+import { INDUSTRIES, REGIONS, DELIVERY_FORMS, UPDATE_FREQUENCIES, PRICE_RANGES } from "@/utils/constants";
 import { formatCurrency, cn, scoreToColor } from "@/utils/formatters";
+
+const PRICE_UNITS = ["元/年", "元/季", "元/月", "元/项目", "元/次"];
+
+const emptyField = () => ({ name: "", type: "", description: "", example: "" });
+
+const initProductForm = () => ({
+  name: "",
+  description: "",
+  industry: INDUSTRIES[0],
+  region: REGIONS[7],
+  coverage: "",
+  deliveryForms: [] as string[],
+  updateFrequency: UPDATE_FREQUENCIES[2],
+  restrictions: "",
+  price: 100000,
+  priceUnit: "元/年",
+  sampleFields: [emptyField()],
+  provider: "当前用户",
+  providerCompany: "示例企业有限公司",
+});
 
 export default function Showcase() {
   const products = useProductStore((s) => s.products);
@@ -33,7 +57,12 @@ export default function Showcase() {
   const toggleCompare = useProductStore((s) => s.toggleCompare);
   const clearCompare = useProductStore((s) => s.clearCompare);
   const compareIds = useProductStore((s) => s.compareIds);
+  const addProduct = useProductStore((s) => s.addProduct);
   const showToast = useUiStore((s) => s.showToast);
+  const demands = useDemandStore((s) => s.demands);
+  const findOrCreateByDemand = useCommunicationStore((s) => s.findOrCreateByDemand);
+  const sendMessage = useCommunicationStore((s) => s.sendMessage);
+  const navigate = useNavigate();
 
   const [keyword, setKeyword] = useState("");
   const [industry, setIndustry] = useState("");
@@ -43,6 +72,13 @@ export default function Showcase() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [showCompare, setShowCompare] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
+
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [productForm, setProductForm] = useState(initProductForm);
+
+  const [showIntentionModal, setShowIntentionModal] = useState(false);
+  const [intentionProduct, setIntentionProduct] = useState<Product | null>(null);
+  const [intentionForm, setIntentionForm] = useState({ demandId: "", note: "" });
 
   const filtered = useMemo(() => {
     const pr = PRICE_RANGES[priceIdx];
@@ -61,14 +97,96 @@ export default function Showcase() {
     [compareIds, products]
   );
 
+  const openDemands = demands.filter((d) => d.status !== "closed");
+
   const handleIntention = (p: Product) => {
-    showToast("success", `已向【${p.providerCompany}】发起采购意向`);
+    setIntentionProduct(p);
+    setIntentionForm({ demandId: "", note: "" });
+    setShowIntentionModal(true);
+  };
+
+  const handleIntentionSubmit = () => {
+    if (!intentionProduct || !intentionForm.demandId) return;
+    const demand = demands.find((d) => d.id === intentionForm.demandId);
+    if (!demand) return;
+    const comm = findOrCreateByDemand(
+      demand.id,
+      demand.title,
+      intentionProduct.id,
+      intentionProduct.name,
+      intentionProduct.providerCompany
+    );
+    sendMessage({
+      communicationId: comm.id,
+      sender: "当前用户",
+      senderRole: "demand",
+      type: "intention",
+      content: `【采购意向】对产品[${intentionProduct.name}]表达采购意向，关联需求：${demand.title}`,
+    });
+    setShowIntentionModal(false);
     setSelected(null);
+    navigate("/communication");
+  };
+
+  const toggleDeliveryForm = (form: string) => {
+    setProductForm((prev) => ({
+      ...prev,
+      deliveryForms: prev.deliveryForms.includes(form)
+        ? prev.deliveryForms.filter((f) => f !== form)
+        : [...prev.deliveryForms, form],
+    }));
+  };
+
+  const updateSampleField = (idx: number, key: string, value: string) => {
+    setProductForm((prev) => ({
+      ...prev,
+      sampleFields: prev.sampleFields.map((f, i) =>
+        i === idx ? { ...f, [key]: value } : f
+      ),
+    }));
+  };
+
+  const addSampleField = () => {
+    setProductForm((prev) => ({
+      ...prev,
+      sampleFields: [...prev.sampleFields, emptyField()],
+    }));
+  };
+
+  const removeSampleField = (idx: number) => {
+    setProductForm((prev) => ({
+      ...prev,
+      sampleFields: prev.sampleFields.filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleProductSubmit = () => {
+    if (!productForm.name.trim() || !productForm.description.trim()) {
+      showToast("error", "请填写必填字段");
+      return;
+    }
+    addProduct({
+      name: productForm.name,
+      description: productForm.description,
+      industry: productForm.industry,
+      region: productForm.region,
+      coverage: productForm.coverage,
+      deliveryForm: productForm.deliveryForms.join(" + "),
+      updateFrequency: productForm.updateFrequency,
+      restrictions: productForm.restrictions,
+      price: productForm.price,
+      priceUnit: productForm.priceUnit,
+      sampleFields: productForm.sampleFields.filter((f) => f.name.trim()),
+      provider: productForm.provider,
+      providerCompany: productForm.providerCompany,
+    });
+    setShowProductForm(false);
+    setProductForm(initProductForm());
+    showToast("success", "产品发布成功！已加入产品橱窗");
   };
 
   return (
     <div className="space-y-5 animate-fadeUp">
-      {/* 顶部栏 */}
       <div className="card p-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[260px] max-w-md">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -130,10 +248,13 @@ export default function Showcase() {
           <div className="text-xs text-ink-400 font-semibold px-2">
             共 <span className="text-ink-800">{filtered.length}</span> 个产品
           </div>
+          <button onClick={() => setShowProductForm(true)} className="btn-primary">
+            <Plus size={16} />
+            发布产品
+          </button>
         </div>
       </div>
 
-      {/* 高级筛选 */}
       {showFilters && (
         <div className="card p-5 animate-fadeUp">
           <div className="grid md:grid-cols-3 gap-5">
@@ -174,7 +295,6 @@ export default function Showcase() {
         </div>
       )}
 
-      {/* 对比悬浮栏 */}
       {compareIds.length > 0 && !showCompare && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 animate-fadeUp">
           <div className="card px-5 py-3 flex items-center gap-4 shadow-cardHover">
@@ -215,7 +335,6 @@ export default function Showcase() {
         </div>
       )}
 
-      {/* 产品网格 */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((p, idx) => (
           <ProductCard
@@ -230,7 +349,6 @@ export default function Showcase() {
         ))}
       </div>
 
-      {/* 产品详情模态框 */}
       {selected && (
         <ProductDetail
           product={selected}
@@ -240,9 +358,313 @@ export default function Showcase() {
         />
       )}
 
-      {/* 对比模态框 */}
       {showCompare && (
         <CompareModal products={compareProducts} onClose={() => setShowCompare(false)} />
+      )}
+
+      {showProductForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-900/40 backdrop-blur-sm animate-fadeUp">
+          <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin animate-scaleIn">
+            <div className="flex items-center justify-between p-6 border-b border-ink-100 sticky top-0 bg-white z-10">
+              <div>
+                <h2 className="font-display text-xl text-ink-800">发布数据产品</h2>
+                <p className="text-xs text-ink-400 mt-1">填写产品信息，发布后将展示在产品橱窗</p>
+              </div>
+              <button onClick={() => { setShowProductForm(false); setProductForm(initProductForm()); }} className="btn-ghost !px-2 !py-2">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="space-y-2">
+                <label className="label">
+                  产品名称 <span className="text-amber-500">*</span>
+                </label>
+                <input
+                  value={productForm.name}
+                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  placeholder="例如：全国企业工商注册数据集"
+                  className="input"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">
+                  产品说明 <span className="text-amber-500">*</span>
+                </label>
+                <textarea
+                  value={productForm.description}
+                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  placeholder="详细描述产品内容、数据来源、应用场景..."
+                  rows={3}
+                  className="input resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="label">所属行业</label>
+                  <select
+                    value={productForm.industry}
+                    onChange={(e) => setProductForm({ ...productForm, industry: e.target.value })}
+                    className="input"
+                  >
+                    {INDUSTRIES.map((i) => (
+                      <option key={i}>{i}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="label">覆盖地域</label>
+                  <select
+                    value={productForm.region}
+                    onChange={(e) => setProductForm({ ...productForm, region: e.target.value })}
+                    className="input"
+                  >
+                    {REGIONS.map((r) => (
+                      <option key={r}>{r}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">数据覆盖范围</label>
+                <input
+                  value={productForm.coverage}
+                  onChange={(e) => setProductForm({ ...productForm, coverage: e.target.value })}
+                  placeholder="例如：覆盖全国31省300万+企业"
+                  className="input"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">可交付形式</label>
+                <div className="flex flex-wrap gap-2">
+                  {DELIVERY_FORMS.map((df) => (
+                    <label
+                      key={df}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-all",
+                        productForm.deliveryForms.includes(df)
+                          ? "bg-ink-800 text-white border-ink-800 shadow-sm"
+                          : "bg-white text-ink-600 border-ink-200 hover:border-mint-400 hover:text-mint-700"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-mint-500"
+                        checked={productForm.deliveryForms.includes(df)}
+                        onChange={() => toggleDeliveryForm(df)}
+                      />
+                      {df.split(" ")[0]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="label">更新频率</label>
+                  <select
+                    value={productForm.updateFrequency}
+                    onChange={(e) => setProductForm({ ...productForm, updateFrequency: e.target.value })}
+                    className="input"
+                  >
+                    {UPDATE_FREQUENCIES.map((u) => (
+                      <option key={u}>{u}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="label">价格单位</label>
+                  <select
+                    value={productForm.priceUnit}
+                    onChange={(e) => setProductForm({ ...productForm, priceUnit: e.target.value })}
+                    className="input"
+                  >
+                    {PRICE_UNITS.map((u) => (
+                      <option key={u}>{u}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">
+                  价格：<span className="text-mint-600 font-bold">{formatCurrency(productForm.price)}</span>
+                  <span className="text-ink-400 font-normal text-xs ml-1">{productForm.priceUnit}</span>
+                </label>
+                <input
+                  type="range"
+                  min={10000}
+                  max={2000000}
+                  step={10000}
+                  value={productForm.price}
+                  onChange={(e) => setProductForm({ ...productForm, price: Number(e.target.value) })}
+                  className="w-full accent-mint-500 mt-1"
+                />
+                <div className="flex justify-between text-[11px] text-ink-400 font-medium">
+                  <span>1万</span>
+                  <span>200万</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">限制条件</label>
+                <textarea
+                  value={productForm.restrictions}
+                  onChange={(e) => setProductForm({ ...productForm, restrictions: e.target.value })}
+                  placeholder="数据使用限制、合规要求、授权范围..."
+                  rows={2}
+                  className="input resize-none"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="label !mb-0">样例字段</label>
+                  <button onClick={addSampleField} className="text-xs font-semibold text-mint-600 hover:text-mint-700 flex items-center gap-1">
+                    <Plus size={12} /> 添加字段
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {productForm.sampleFields.map((field, idx) => (
+                    <div key={idx} className="flex items-start gap-2">
+                      <div className="grid grid-cols-4 gap-2 flex-1">
+                        <input
+                          value={field.name}
+                          onChange={(e) => updateSampleField(idx, "name", e.target.value)}
+                          placeholder="字段名"
+                          className="input text-xs"
+                        />
+                        <input
+                          value={field.type}
+                          onChange={(e) => updateSampleField(idx, "type", e.target.value)}
+                          placeholder="类型"
+                          className="input text-xs"
+                        />
+                        <input
+                          value={field.description}
+                          onChange={(e) => updateSampleField(idx, "description", e.target.value)}
+                          placeholder="描述"
+                          className="input text-xs"
+                        />
+                        <input
+                          value={field.example ?? ""}
+                          onChange={(e) => updateSampleField(idx, "example", e.target.value)}
+                          placeholder="示例"
+                          className="input text-xs"
+                        />
+                      </div>
+                      <button
+                        onClick={() => removeSampleField(idx)}
+                        className="mt-1.5 text-ink-300 hover:text-amber-500 transition-colors shrink-0"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-ink-100 sticky bottom-0 bg-white/95 backdrop-blur-sm">
+              <button onClick={() => { setShowProductForm(false); setProductForm(initProductForm()); }} className="btn-outline">
+                取消
+              </button>
+              <button onClick={handleProductSubmit} className="btn-primary">
+                <Plus size={16} />
+                立即发布
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showIntentionModal && intentionProduct && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-ink-900/40 backdrop-blur-sm animate-fadeUp" onClick={() => setShowIntentionModal(false)}>
+          <div
+            className="card w-full max-w-lg animate-scaleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-ink-100">
+              <div>
+                <h2 className="font-display text-xl text-ink-800 flex items-center gap-2">
+                  <Handshake size={20} className="text-mint-500" />
+                  发起采购意向
+                </h2>
+                <p className="text-xs text-ink-400 mt-1">
+                  对产品【{intentionProduct.name}】发起意向，将创建沟通通道
+                </p>
+              </div>
+              <button onClick={() => setShowIntentionModal(false)} className="btn-ghost !px-2 !py-2">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="space-y-2">
+                <label className="label">
+                  关联需求 <span className="text-amber-500">*</span>
+                </label>
+                <select
+                  value={intentionForm.demandId}
+                  onChange={(e) => setIntentionForm({ ...intentionForm, demandId: e.target.value })}
+                  className="input"
+                >
+                  <option value="">请选择需求</option>
+                  {openDemands.map((d) => (
+                    <option key={d.id} value={d.id}>{d.title}</option>
+                  ))}
+                </select>
+                {openDemands.length === 0 && (
+                  <p className="text-xs text-ink-400">暂无可关联的需求，请先发布需求</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="label">备注信息</label>
+                <textarea
+                  value={intentionForm.note}
+                  onChange={(e) => setIntentionForm({ ...intentionForm, note: e.target.value })}
+                  placeholder="可补充说明您的采购意向、关注点、期望等..."
+                  rows={3}
+                  className="input resize-none"
+                />
+              </div>
+
+              <div className="p-4 rounded-xl2 bg-mint-50/60 border border-mint-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-mint-100 to-white border border-mint-100 flex items-center justify-center shrink-0">
+                    <Database size={20} className="text-mint-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-ink-800 truncate">{intentionProduct.name}</div>
+                    <div className="text-xs text-ink-400 flex items-center gap-2 mt-0.5">
+                      <span className="flex items-center gap-1"><Building2 size={10} /> {intentionProduct.providerCompany}</span>
+                      <span className="text-mint-600 font-semibold">{formatCurrency(intentionProduct.price)}{intentionProduct.priceUnit}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-ink-100">
+              <button onClick={() => setShowIntentionModal(false)} className="btn-outline">
+                取消
+              </button>
+              <button
+                onClick={handleIntentionSubmit}
+                disabled={!intentionForm.demandId}
+                className={cn("btn-primary", !intentionForm.demandId && "opacity-50 cursor-not-allowed")}
+              >
+                <Handshake size={16} />
+                确认发起
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
