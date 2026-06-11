@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Star,
@@ -21,14 +21,20 @@ import {
   Handshake,
   Trash2,
   Plus,
+  FileText,
+  Lightbulb,
+  Target,
+  Clock,
 } from "lucide-react";
 import { useProductStore } from "@/store/useProductStore";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
+import { useMatchReportStore } from "@/store/useMatchReportStore";
 import { useUiStore } from "@/store/useUiStore";
-import type { Product } from "@/types";
+import type { Product, MatchReport } from "@/types";
 import { INDUSTRIES, REGIONS, DELIVERY_FORMS, UPDATE_FREQUENCIES, PRICE_RANGES } from "@/utils/constants";
-import { formatCurrency, cn, scoreToColor } from "@/utils/formatters";
+import { formatCurrency, cn, scoreToColor, formatDateTime, scoreToBg } from "@/utils/formatters";
+import { loadJson, saveJson } from "@/utils/storage";
 
 const PRICE_UNITS = ["元/年", "元/季", "元/月", "元/项目", "元/次"];
 
@@ -60,8 +66,11 @@ export default function Showcase() {
   const addProduct = useProductStore((s) => s.addProduct);
   const showToast = useUiStore((s) => s.showToast);
   const demands = useDemandStore((s) => s.demands);
-  const findOrCreateByDemand = useCommunicationStore((s) => s.findOrCreateByDemand);
-  const sendMessage = useCommunicationStore((s) => s.sendMessage);
+  const findOrCreateByDemandAndProduct = useCommunicationStore((s) => s.findOrCreateByDemandAndProduct);
+  const findByProduct = useCommunicationStore((s) => s.findByProduct);
+  const findByDemandAndProduct = useCommunicationStore((s) => s.findByDemandAndProduct);
+  const communications = useCommunicationStore((s) => s.communications);
+  const { findByProduct: findReportsByProduct, getById: getReportById } = useMatchReportStore();
   const navigate = useNavigate();
 
   const [keyword, setKeyword] = useState("");
@@ -80,6 +89,9 @@ export default function Showcase() {
   const [intentionProduct, setIntentionProduct] = useState<Product | null>(null);
   const [intentionForm, setIntentionForm] = useState({ demandId: "", note: "" });
 
+  const [selectedReport, setSelectedReport] = useState<MatchReport | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
+
   const filtered = useMemo(() => {
     const pr = PRICE_RANGES[priceIdx];
     return filterFn({
@@ -97,7 +109,26 @@ export default function Showcase() {
     [compareIds, products]
   );
 
+  const productsWithIntentions = useMemo(() => {
+    const set = new Set<string>();
+    communications.forEach((c) => set.add(c.productId));
+    return set;
+  }, [communications]);
+
   const openDemands = demands.filter((d) => d.status !== "closed");
+
+  useEffect(() => {
+    const draft = loadJson("productDraft", null as any);
+    if (draft) {
+      setProductForm(draft);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showProductForm) {
+      saveJson("productDraft", productForm);
+    }
+  }, [productForm, showProductForm]);
 
   const handleIntention = (p: Product) => {
     setIntentionProduct(p);
@@ -109,20 +140,14 @@ export default function Showcase() {
     if (!intentionProduct || !intentionForm.demandId) return;
     const demand = demands.find((d) => d.id === intentionForm.demandId);
     if (!demand) return;
-    const comm = findOrCreateByDemand(
+    findOrCreateByDemandAndProduct(
       demand.id,
-      demand.title,
       intentionProduct.id,
+      demand.title,
       intentionProduct.name,
-      intentionProduct.providerCompany
+      intentionProduct.providerCompany,
+      intentionForm.note || undefined
     );
-    sendMessage({
-      communicationId: comm.id,
-      sender: "当前用户",
-      senderRole: "demand",
-      type: "intention",
-      content: `【采购意向】对产品[${intentionProduct.name}]表达采购意向，关联需求：${demand.title}`,
-    });
     setShowIntentionModal(false);
     setSelected(null);
     navigate("/communication");
@@ -180,6 +205,7 @@ export default function Showcase() {
       provider: productForm.provider,
       providerCompany: productForm.providerCompany,
     });
+    saveJson("productDraft", null);
     setShowProductForm(false);
     setProductForm(initProductForm());
     showToast("success", "产品发布成功！已加入产品橱窗");
@@ -342,6 +368,7 @@ export default function Showcase() {
             product={p}
             idx={idx}
             inCompare={compareIds.includes(p.id)}
+            hasIntention={productsWithIntentions.has(p.id)}
             onToggleCompare={() => toggleCompare(p.id)}
             onToggleFav={() => toggleFavorite(p.id)}
             onClick={() => setSelected(p)}
@@ -352,9 +379,13 @@ export default function Showcase() {
       {selected && (
         <ProductDetail
           product={selected}
+          hasIntention={productsWithIntentions.has(selected.id)}
+          reports={findReportsByProduct(selected.id)}
           onClose={() => setSelected(null)}
           onFavorite={() => toggleFavorite(selected.id)}
           onIntention={() => handleIntention(selected)}
+          onViewCommunication={() => navigate("/communication")}
+          onViewReport={(report) => { setSelectedReport(report); setShowReportModal(true); }}
         />
       )}
 
@@ -666,6 +697,141 @@ export default function Showcase() {
           </div>
         </div>
       )}
+
+      {showReportModal && selectedReport && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-ink-900/40 backdrop-blur-sm animate-fadeUp"
+          onClick={() => { setShowReportModal(false); setSelectedReport(null); }}
+        >
+          <div
+            className="card w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-scaleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-ink-100 bg-gradient-to-br from-mint-50 via-white to-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-grad-mint flex items-center justify-center shadow-md shadow-mint-400/20">
+                  <FileText size={18} className="text-ink-900" />
+                </div>
+                <div>
+                  <h2 className="font-display text-xl text-ink-800">撮合分析报告</h2>
+                  <div className="text-xs text-ink-400">
+                    报告编号 {selectedReport.id} · 生成于 {selectedReport.generatedBy}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => { setShowReportModal(false); setSelectedReport(null); }} className="btn-ghost !px-2 !py-2">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto scrollbar-thin p-6 space-y-5">
+              <div className="grid grid-cols-3 items-center gap-3">
+                <div className="p-4 rounded-xl bg-ink-50 border border-ink-100">
+                  <div className="text-[10px] font-bold text-ink-400 uppercase tracking-wider mb-1">需求侧</div>
+                  <div className="text-sm font-semibold text-ink-800 line-clamp-2">{demands.find(d => d.id === selectedReport.demandId)?.publisherCompany}</div>
+                </div>
+                <div className="flex items-center justify-center">
+                  <div className="flex flex-col items-center">
+                    <div className="relative w-20 h-20">
+                      <svg className="w-20 h-20 -rotate-90" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="8" fill="none" className="text-ink-100" />
+                        <circle
+                          cx="50" cy="50" r="42"
+                          stroke="currentColor"
+                          strokeWidth="8"
+                          fill="none"
+                          strokeLinecap="round"
+                          strokeDasharray={`${selectedReport.matchScore * 2.64} 264`}
+                          className={scoreToBg(selectedReport.matchScore).replace("bg-", "text-")}
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className={cn("text-lg font-display font-bold", scoreToColor(selectedReport.matchScore))}>
+                          {selectedReport.matchScore}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 rounded-xl bg-mint-50 border border-mint-100">
+                  <div className="text-[10px] font-bold text-mint-600 uppercase tracking-wider mb-1">供给侧</div>
+                  <div className="text-sm font-semibold text-ink-800 line-clamp-2">{products.find(p => p.id === selectedReport.productId)?.providerCompany}</div>
+                </div>
+              </div>
+
+              <div className="text-xs text-ink-400 text-center">
+                生成时间：{formatDateTime(selectedReport.createdAt)}
+              </div>
+
+              <div>
+                <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Lightbulb size={12} /> 综合评价
+                </div>
+                <p className="text-sm text-ink-700 leading-relaxed p-4 rounded-xl bg-gradient-to-br from-amber-50/70 to-white border border-amber-100">
+                  {selectedReport.summary}
+                </p>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Target size={12} /> 匹配维度明细
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {selectedReport.dimensionScores.map((d) => (
+                    <div
+                      key={d.name}
+                      className="p-3 rounded-xl bg-white border border-ink-100"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-ink-600">{d.label}</span>
+                        <span className={cn("text-base font-display font-bold", scoreToBg(d.score).replace("bg-", "text-"))}>
+                          {d.score}
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-ink-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full", scoreToBg(d.score))} style={{ width: `${d.score}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {selectedReport.timelinessNote && (
+                <div>
+                  <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Clock size={12} /> 时效说明
+                  </div>
+                  <p className="text-sm text-ink-700 leading-relaxed p-4 rounded-xl bg-gradient-to-br from-blue-50/70 to-white border border-blue-100">
+                    {selectedReport.timelinessNote}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <div className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 size={12} /> 运营建议
+                </div>
+                <ol className="space-y-2">
+                  {selectedReport.recommendations.map((r, idx) => (
+                    <li key={idx} className="flex items-start gap-2.5 text-sm text-ink-700 p-3 rounded-lg bg-ink-50/60 border border-ink-100">
+                      <span className="w-5 h-5 rounded-full bg-ink-800 text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <span className="leading-relaxed">{r}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-ink-100">
+              <button onClick={() => { setShowReportModal(false); setSelectedReport(null); }} className="btn-primary">
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -698,6 +864,7 @@ function ProductCard({
   product,
   idx,
   inCompare,
+  hasIntention,
   onToggleCompare,
   onToggleFav,
   onClick,
@@ -705,6 +872,7 @@ function ProductCard({
   product: Product;
   idx: number;
   inCompare: boolean;
+  hasIntention: boolean;
   onToggleCompare: () => void;
   onToggleFav: () => void;
   onClick: () => void;
@@ -723,6 +891,11 @@ function ProductCard({
           </div>
         </div>
         <div className="absolute right-3 top-3 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          {hasIntention && (
+            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-mint-500 text-white shadow-sm flex items-center gap-1">
+              <Handshake size={10} /> 意向中
+            </span>
+          )}
           <label
             className={cn(
               "flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-md transition-all",
@@ -811,14 +984,22 @@ function ProductCard({
 
 function ProductDetail({
   product,
+  hasIntention,
+  reports,
   onClose,
   onFavorite,
   onIntention,
+  onViewCommunication,
+  onViewReport,
 }: {
   product: Product;
+  hasIntention: boolean;
+  reports: MatchReport[];
   onClose: () => void;
   onFavorite: () => void;
   onIntention: () => void;
+  onViewCommunication: () => void;
+  onViewReport: (report: MatchReport) => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-900/40 backdrop-blur-sm animate-fadeUp" onClick={onClose}>
@@ -903,6 +1084,59 @@ function ProductDetail({
               <p className="text-sm text-amber-800 leading-relaxed">{product.restrictions}</p>
             </div>
           </DetailSection>
+
+          <DetailSection title="撮合报告历史" icon={<FileText size={14} />}>
+            {reports.length === 0 ? (
+              <div className="text-sm text-ink-400 text-center py-6">
+                暂无撮合报告
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {reports.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between p-3 rounded-xl bg-ink-50/60 border border-ink-100 hover:bg-ink-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-10 h-10">
+                        <svg className="w-10 h-10 -rotate-90" viewBox="0 0 100 100">
+                          <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="8" fill="none" className="text-ink-100" />
+                          <circle
+                            cx="50" cy="50" r="42"
+                            stroke="currentColor"
+                            strokeWidth="8"
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeDasharray={`${r.matchScore * 2.64} 264`}
+                            className={scoreToBg(r.matchScore).replace("bg-", "text-")}
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className={cn("text-xs font-bold", scoreToColor(r.matchScore))}>
+                            {r.matchScore}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-ink-800">
+                          {r.matchScore}分 · 撮合报告
+                        </div>
+                        <div className="text-xs text-ink-400">
+                          {formatDateTime(r.createdAt)}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onViewReport(r)}
+                      className="text-xs font-bold text-mint-600 hover:text-mint-700 px-3 py-1.5 rounded-lg bg-mint-50 hover:bg-mint-100 transition-all"
+                    >
+                      查看
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DetailSection>
         </div>
 
         <div className="flex items-center justify-end gap-3 p-5 border-t border-ink-100 bg-white/80 backdrop-blur-sm">
@@ -913,9 +1147,20 @@ function ProductDetail({
               <><StarOff size={16} /> 收藏</>
             )}
           </button>
-          <button onClick={onIntention} className="btn-mint">
-            <Handshake size={16} /> 发起采购意向
-          </button>
+          {hasIntention ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-3 py-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1.5">
+                <CheckCircle2 size={14} /> 已发起意向
+              </span>
+              <button onClick={onViewCommunication} className="btn-mint">
+                <Eye size={16} /> 查看沟通
+              </button>
+            </div>
+          ) : (
+            <button onClick={onIntention} className="btn-mint">
+              <Handshake size={16} /> 发起采购意向
+            </button>
+          )}
         </div>
       </div>
     </div>

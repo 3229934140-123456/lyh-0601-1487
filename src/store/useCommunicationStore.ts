@@ -1,8 +1,9 @@
 import { create } from "zustand";
-import type { Communication, Message, MessageAttachment } from "@/types";
+import type { Communication, Message, MessageAttachment, DemandStatus } from "@/types";
 import { COMMUNICATIONS, MESSAGES } from "@/data/communications";
 import { uid } from "@/utils/formatters";
 import { loadJson, saveJson } from "@/utils/storage";
+import { useDemandStore } from "./useDemandStore";
 
 interface CommunicationState {
   communications: Communication[];
@@ -25,9 +26,21 @@ interface CommunicationState {
     productName: string;
     partyA: string;
     partyB: string;
+    initialMessage?: string;
+    initialMessageRole?: Message["senderRole"];
   }) => Communication;
-  findOrCreateByDemand: (demandId: string, demandTitle: string, productId?: string, productName?: string, partyB?: string) => Communication;
+  findOrCreateByDemandAndProduct: (
+    demandId: string,
+    productId: string,
+    demandTitle: string,
+    productName: string,
+    partyB?: string,
+    initialNote?: string
+  ) => Communication;
   findByDemandAndProduct: (demandId: string, productId: string) => Communication | undefined;
+  findByDemand: (demandId: string) => Communication[];
+  findByProduct: (productId: string) => Communication[];
+  updateStatus: (id: string, status: DemandStatus) => void;
 }
 
 export const useCommunicationStore = create<CommunicationState>((set, get) => ({
@@ -67,16 +80,31 @@ export const useCommunicationStore = create<CommunicationState>((set, get) => ({
   },
 
   createCommunication: (params) => {
+    const { initialMessage, initialMessageRole, ...rest } = params;
+    const now = new Date().toISOString();
     const newItem: Communication = {
       id: uid("c"),
-      ...params,
-      lastMessage: "双方已建立沟通通道",
-      lastMessageAt: new Date().toISOString(),
+      ...rest,
+      lastMessage: initialMessage ? initialMessage.slice(0, 60) : "双方已建立沟通通道",
+      lastMessageAt: now,
       unreadCount: 0,
       status: "pending",
     };
+    const messages: Message[] = [];
+    if (initialMessage) {
+      messages.push({
+        id: uid("msg"),
+        communicationId: newItem.id,
+        sender: "当前用户",
+        senderRole: initialMessageRole ?? "demand",
+        type: "intention",
+        content: initialMessage,
+        timestamp: now,
+      });
+    }
     set((state) => ({
       communications: [newItem, ...state.communications],
+      messages: messages.length ? [...state.messages, ...messages] : state.messages,
       activeId: newItem.id,
     }));
     return newItem;
@@ -88,20 +116,55 @@ export const useCommunicationStore = create<CommunicationState>((set, get) => ({
     );
   },
 
-  findOrCreateByDemand: (demandId, demandTitle, productId, productName, partyB) => {
-    const existing = get().communications.find((c) => c.demandId === demandId);
+  findByDemand: (demandId) => {
+    return get().communications.filter((c) => c.demandId === demandId);
+  },
+
+  findByProduct: (productId) => {
+    return get().communications.filter((c) => c.productId === productId);
+  },
+
+  findOrCreateByDemandAndProduct: (
+    demandId,
+    productId,
+    demandTitle,
+    productName,
+    partyB,
+    initialNote
+  ) => {
+    const existing = get().findByDemandAndProduct(demandId, productId);
     if (existing) {
       set({ activeId: existing.id });
       return existing;
     }
+    const initialMessage = initialNote
+      ? `【采购意向】对产品[${productName}]表达采购意向，关联需求：${demandTitle}。备注：${initialNote}`
+      : `【采购意向】对产品[${productName}]表达采购意向，关联需求：${demandTitle}`;
     return get().createCommunication({
       demandId,
-      productId: productId ?? "",
+      productId,
       demandTitle,
-      productName: productName ?? "",
+      productName,
       partyA: "当前用户",
       partyB: partyB ?? "待确认",
+      initialMessage,
+      initialMessageRole: "demand",
     });
+  },
+
+  updateStatus: (id, status) => {
+    set((state) => ({
+      communications: state.communications.map((c) =>
+        c.id === id ? { ...c, status } : c
+      ),
+    }));
+    const comm = get().communications.find((c) => c.id === id);
+    if (comm) {
+      const demandStore = useDemandStore.getState();
+      if (demandStore.updateStatus) {
+        demandStore.updateStatus(comm.demandId, status);
+      }
+    }
   },
 }));
 

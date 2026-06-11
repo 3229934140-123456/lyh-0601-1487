@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Plus,
   Star,
@@ -16,15 +16,21 @@ import {
   XCircle,
   MessageSquare,
   TrendingUp,
+  Eye,
+  BarChart3,
 } from "lucide-react";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useNavigate } from "react-router-dom";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
+import { useMatchReportStore } from "@/store/useMatchReportStore";
+import { useProductStore } from "@/store/useProductStore";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { DemandStatus, Demand } from "@/types";
+import { MatchScoreRing } from "@/components/MatchScoreRing";
+import type { DemandStatus, Demand, MatchReport } from "@/types";
 import { INDUSTRIES, REGIONS, UPDATE_FREQUENCIES, DEMAND_STATUS_META } from "@/utils/constants";
-import { formatCurrency, formatDate, cn } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatDateTime, cn, scoreToColor } from "@/utils/formatters";
+import { loadJson, saveJson } from "@/utils/storage";
 
 const STATUS_TABS: (DemandStatus | "all")[] = ["all", "pending", "negotiating", "signing", "delivered", "closed"];
 
@@ -43,7 +49,10 @@ export default function DemandPublish() {
   const addDemand = useDemandStore((s) => s.addDemand);
   const closeDemand = useDemandStore((s) => s.closeDemand);
   const showToast = useUiStore((s) => s.showToast);
-  const findOrCreateByDemand = useCommunicationStore((s) => s.findOrCreateByDemand);
+  const findCommsByDemand = useCommunicationStore((s) => s.findByDemand);
+  const findOrCreateByDemandAndProduct = useCommunicationStore((s) => s.findOrCreateByDemandAndProduct);
+  const products = useProductStore((s) => s.products);
+  const findReportsByDemand = useMatchReportStore((s) => s.findByDemand);
   const navigate = useNavigate();
 
   const stats = useMemo(() => {
@@ -62,8 +71,11 @@ export default function DemandPublish() {
   const [keyword, setKeyword] = useState("");
   const [filterIndustry, setFilterIndustry] = useState<string>("");
   const [sortBy, setSortBy] = useState<"new" | "budget">("new");
+  const [selectedProductId, setSelectedProductId] = useState<string>("");
+  const [selectedReport, setSelectedReport] = useState<MatchReport | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
-  const [form, setForm] = useState({
+  const defaultForm = {
     title: "",
     dataScope: "",
     purpose: "",
@@ -73,7 +85,20 @@ export default function DemandPublish() {
     region: REGIONS[7],
     publisher: "当前用户",
     publisherCompany: "示例企业有限公司",
-  });
+  };
+
+  const [form, setForm] = useState(defaultForm);
+
+  useEffect(() => {
+    const draft = loadJson("demandDraft", null);
+    if (draft) {
+      setForm(draft);
+    }
+  }, []);
+
+  useEffect(() => {
+    saveJson("demandDraft", form);
+  }, [form]);
 
   const filtered = demands
     .filter((d) => (activeTab === "all" ? true : d.status === activeTab))
@@ -90,23 +115,37 @@ export default function DemandPublish() {
     }
     addDemand(form);
     setShowForm(false);
-    setForm({
-      title: "",
-      dataScope: "",
-      purpose: "",
-      updateFrequency: UPDATE_FREQUENCIES[2],
-      budget: 100000,
-      industry: INDUSTRIES[0],
-      region: REGIONS[7],
-      publisher: "当前用户",
-      publisherCompany: "示例企业有限公司",
-    });
+    setForm(defaultForm);
+    saveJson("demandDraft", null);
     showToast("success", "需求发布成功！已进入撮合匹配池");
   };
 
   const handleClose = (id: string) => {
     closeDemand(id);
     showToast("success", "需求已关闭");
+  };
+
+  const handleStartCommunication = (demandId: string, demandTitle: string) => {
+    if (!selectedProductId) {
+      showToast("error", "请先选择一个产品");
+      return;
+    }
+    const product = products.find((p) => p.id === selectedProductId);
+    if (!product) return;
+    findOrCreateByDemandAndProduct(
+      demandId,
+      selectedProductId,
+      demandTitle,
+      product.name,
+      product.providerCompany
+    );
+    navigate("/communication");
+  };
+
+  const handleEnterCommunication = (commId: string) => {
+    const setActive = useCommunicationStore.getState().setActive;
+    setActive(commId);
+    navigate("/communication");
     setSelectedDemand(null);
   };
 
@@ -442,6 +481,102 @@ export default function DemandPublish() {
                   <p className="text-sm text-ink-600 font-semibold">{selectedDemand.deadline}</p>
                 </Section>
               )}
+
+              <Section title="沟通会话" icon={<MessageSquare size={14} />}>
+                {findCommsByDemand(selectedDemand.id).length > 0 ? (
+                  <div className="space-y-2">
+                    {findCommsByDemand(selectedDemand.id).map((comm) => (
+                      <div
+                        key={comm.id}
+                        className="p-3 rounded-xl2 border border-ink-100 bg-white hover:border-mint-200 hover:bg-mint-50/30 transition-all"
+                      >
+                        <div className="flex items-center justify-between gap-3 mb-1.5">
+                          <span className="text-sm font-semibold text-ink-800 truncate">
+                            {comm.productName}
+                          </span>
+                          <StatusBadge status={comm.status} size="sm" />
+                        </div>
+                        <p className="text-xs text-ink-500 line-clamp-1 mb-2">
+                          {comm.lastMessage}
+                        </p>
+                        <button
+                          onClick={() => handleEnterCommunication(comm.id)}
+                          className="w-full btn-outline !py-1.5 !px-3 text-xs"
+                        >
+                          <MessageSquare size={12} />
+                          进入沟通
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-ink-400">暂无沟通会话，选择一个产品开始沟通</p>
+                    <select
+                      value={selectedProductId}
+                      onChange={(e) => setSelectedProductId(e.target.value)}
+                      className="w-full input !py-2 text-sm"
+                    >
+                      <option value="">请选择产品</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => handleStartCommunication(selectedDemand.id, selectedDemand.title)}
+                      disabled={!selectedProductId}
+                      className="w-full btn-mint !py-2 text-sm"
+                    >
+                      <MessageSquare size={14} />
+                      开始沟通
+                    </button>
+                  </div>
+                )}
+              </Section>
+
+              <Section title="撮合报告历史" icon={<BarChart3 size={14} />}>
+                {findReportsByDemand(selectedDemand.id).length > 0 ? (
+                  <div className="space-y-2">
+                    {findReportsByDemand(selectedDemand.id).map((report) => {
+                      const product = products.find((p) => p.id === report.productId);
+                      return (
+                        <div
+                          key={report.id}
+                          className="p-3 rounded-xl2 border border-ink-100 bg-white hover:border-mint-200 transition-all"
+                        >
+                          <div className="flex items-center justify-between gap-3 mb-1.5">
+                            <span className="text-sm font-semibold text-ink-800 truncate">
+                              {product?.name || "未知产品"}
+                            </span>
+                            <span className={cn("text-sm font-bold", scoreToColor(report.matchScore))}>
+                              {report.matchScore}分
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs text-ink-400">
+                              {formatDate(report.createdAt)}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSelectedReport(report);
+                                setShowReportModal(true);
+                              }}
+                              className="btn-outline !py-1 !px-2.5 text-[11px]"
+                            >
+                              <Eye size={12} />
+                              查看
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-ink-400">暂无撮合报告</p>
+                )}
+              </Section>
             </div>
 
             <div className="sticky bottom-0 p-6 bg-gradient-to-t from-white via-white/95 to-transparent border-t border-ink-100 flex flex-wrap gap-2.5 justify-end">
@@ -469,16 +604,83 @@ export default function DemandPublish() {
                   </>
                 )}
               </button>
-              <button
-                onClick={() => {
-                  const comm = findOrCreateByDemand(selectedDemand.id, selectedDemand.title);
-                  navigate("/communication");
-                }}
-                className="btn-mint"
-              >
-                <MessageSquare size={16} />
-                进入沟通
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReportModal && selectedReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-900/40 backdrop-blur-sm animate-fadeUp" onClick={() => setShowReportModal(false)}>
+          <div className="card w-full max-w-lg max-h-[85vh] overflow-y-auto scrollbar-thin animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-ink-100 sticky top-0 bg-white z-10">
+              <div>
+                <h2 className="font-display text-xl text-ink-800">撮合报告详情</h2>
+                <p className="text-xs text-ink-400 mt-1">
+                  {products.find((p) => p.id === selectedReport.productId)?.name || "未知产品"}
+                </p>
+              </div>
+              <button onClick={() => setShowReportModal(false)} className="btn-ghost !px-2 !py-2">
+                <X size={18} />
               </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="flex items-center justify-center py-4">
+                <MatchScoreRing score={selectedReport.matchScore} size={120} strokeWidth={10} />
+              </div>
+
+              <Section title="各维度评分" icon={<BarChart3 size={14} />}>
+                <div className="space-y-3">
+                  {selectedReport.dimensionScores.map((dim) => (
+                    <div key={dim.name} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-ink-600 font-medium">{dim.label}</span>
+                        <span className={cn("font-bold", scoreToColor(dim.score))}>{dim.score}分</span>
+                      </div>
+                      <div className="h-2 bg-ink-100 rounded-full overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", scoreToColor(dim.score).replace("text-", "bg-"))}
+                          style={{ width: `${dim.score}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="报告摘要" icon={<FileText size={14} />}>
+                <p className="text-sm text-ink-600 leading-relaxed">
+                  {selectedReport.summary}
+                </p>
+              </Section>
+
+              {selectedReport.timelinessNote && (
+                <Section title="时效性说明" icon={<CalendarClock size={14} />}>
+                  <p className="text-sm text-amber-600 leading-relaxed bg-amber-50 p-3 rounded-lg">
+                    {selectedReport.timelinessNote}
+                  </p>
+                </Section>
+              )}
+
+              <Section title="优化建议" icon={<Target size={14} />}>
+                <ul className="space-y-2">
+                  {selectedReport.recommendations.map((rec, idx) => (
+                    <li key={idx} className="flex items-start gap-2 text-sm text-ink-600">
+                      <span className="w-5 h-5 rounded-full bg-mint-100 text-mint-600 flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <span>{rec}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+
+              <div className="pt-2 border-t border-ink-100">
+                <div className="flex items-center justify-between text-xs text-ink-400">
+                  <span>生成人：{selectedReport.generatedBy}</span>
+                  <span>{formatDateTime(selectedReport.createdAt)}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

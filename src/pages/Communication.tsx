@@ -20,9 +20,9 @@ import {
 } from "lucide-react";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { useUiStore } from "@/store/useUiStore";
-import type { Message, MessageType, UserRole } from "@/types";
+import type { Message, MessageType, UserRole, DemandStatus } from "@/types";
 import { StatusBadge } from "@/components/StatusBadge";
-import { DEMAND_STATUS_META, MESSAGE_TYPE_META } from "@/utils/constants";
+import { DEMAND_STATUS_META, MESSAGE_TYPE_META, DEMAND_STATUS_FLOW } from "@/utils/constants";
 import { formatDateTime, cn } from "@/utils/formatters";
 
 const TYPE_FILTERS: (MessageType | "all")[] = ["all", "intention", "question", "material", "minutes"];
@@ -40,6 +40,7 @@ export default function Communication() {
   const markAsRead = useCommunicationStore((s) => s.markAsRead);
   const messages = useCommunicationStore((s) => s.messages);
   const sendMessage = useCommunicationStore((s) => s.sendMessage);
+  const updateStatus = useCommunicationStore((s) => s.updateStatus);
   const showToast = useUiStore((s) => s.showToast);
   const role = useUiStore((s) => s.role);
 
@@ -224,43 +225,91 @@ export default function Communication() {
         {active ? (
           <>
             {/* 会话头部 */}
-            <div className="p-5 border-b border-ink-100 flex items-center justify-between gap-4 bg-gradient-to-r from-ink-50/80 to-white">
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="flex -space-x-2">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
-                    {active.partyA.slice(0, 1)}
+            <div className="p-5 border-b border-ink-100 bg-gradient-to-r from-ink-50/80 to-white">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="flex -space-x-2">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
+                      {active.partyA.slice(0, 1)}
+                    </div>
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-mint-400 to-mint-600 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
+                      {active.partyB.slice(0, 1)}
+                    </div>
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
+                      <Shield size={14} />
+                    </div>
                   </div>
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-mint-400 to-mint-600 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
-                    {active.partyB.slice(0, 1)}
-                  </div>
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white font-bold text-sm ring-2 ring-white shadow-md">
-                    <Shield size={14} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-display text-lg text-ink-800 truncate">
+                        {active.partyA}
+                        <span className="mx-2 text-ink-300">↔</span>
+                        {active.partyB}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-ink-400">
+                      <StatusBadge status={active.status} />
+                      <span>·</span>
+                      <span className="truncate">{active.demandTitle}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-display text-lg text-ink-800 truncate">
-                      {active.partyA}
-                      <span className="mx-2 text-ink-300">↔</span>
-                      {active.partyB}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-ink-400">
-                    <StatusBadge status={active.status} />
-                    <span>·</span>
-                    <span className="truncate">{active.demandTitle}</span>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button className="btn-outline !py-2 !px-3 text-xs">
+                    <Sparkles size={14} />
+                    生成会议纪要
+                  </button>
+                  <button className="btn-outline !py-2 !px-3 text-xs">
+                    <Download size={14} />
+                    导出记录
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button className="btn-outline !py-2 !px-3 text-xs">
-                  <Sparkles size={14} />
-                  生成会议纪要
-                </button>
-                <button className="btn-outline !py-2 !px-3 text-xs">
-                  <Download size={14} />
-                  导出记录
-                </button>
+              <div className="flex items-center gap-3 pt-3 border-t border-ink-100">
+                <span className="text-xs font-bold text-ink-500 uppercase tracking-wider shrink-0">状态推进</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {DEMAND_STATUS_FLOW.map((status, idx) => {
+                    const currentIdx = DEMAND_STATUS_FLOW.indexOf(active.status);
+                    const isCurrent = status === active.status;
+                    const isPast = idx < currentIdx;
+                    const isNext = idx === currentIdx + 1;
+                    const meta = DEMAND_STATUS_META[status];
+                    const buttonLabels: Record<DemandStatus, string> = {
+                      pending: "待确认",
+                      negotiating: "推进到洽谈",
+                      signing: "推进到签约",
+                      delivered: "标记已交付",
+                      closed: "已关闭",
+                    };
+                    return (
+                      <div key={status} className="flex items-center gap-2">
+                        {isCurrent ? (
+                          <StatusBadge status={status} size="md" />
+                        ) : isNext ? (
+                          <button
+                            onClick={() => updateStatus(active.id, status)}
+                            className={cn(
+                              "px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all",
+                              "bg-white border-ink-200 text-ink-600 hover:border-mint-400 hover:text-mint-700 hover:bg-mint-50"
+                            )}
+                          >
+                            {buttonLabels[status]}
+                          </button>
+                        ) : (
+                          <span className={cn(
+                            "px-3 py-1.5 text-xs font-semibold rounded-lg",
+                            isPast ? "bg-ink-100 text-ink-400" : "bg-ink-50 text-ink-300"
+                          )}>
+                            {meta.label}
+                          </span>
+                        )}
+                        {idx < DEMAND_STATUS_FLOW.length - 1 && (
+                          <ChevronRight size={12} className="text-ink-300" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 

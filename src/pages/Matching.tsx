@@ -21,17 +21,19 @@ import {
   ThumbsUp,
   Lightbulb,
   Handshake,
+  Eye,
 } from "lucide-react";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useProductStore } from "@/store/useProductStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
+import { useMatchReportStore } from "@/store/useMatchReportStore";
 import { MatchScoreRing } from "@/components/MatchScoreRing";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { MatchReport, MatchResult } from "@/types";
 import { INDUSTRIES, REGIONS, UPDATE_FREQUENCIES, PRICE_RANGES } from "@/utils/constants";
 import { calculateMatch, generateMatchReport } from "@/utils/matchEngine";
-import { formatCurrency, cn, scoreToBg } from "@/utils/formatters";
+import { formatCurrency, cn, scoreToBg, scoreToColor, formatDateTime } from "@/utils/formatters";
 
 export default function Matching() {
   const allDemands = useDemandStore((s) => s.demands);
@@ -42,7 +44,8 @@ export default function Matching() {
   const products = useProductStore((s) => s.products);
   const showToast = useUiStore((s) => s.showToast);
   const navigate = useNavigate();
-  const { findOrCreateByDemand, sendMessage } = useCommunicationStore();
+  const { findOrCreateByDemandAndProduct, findByDemandAndProduct } = useCommunicationStore();
+  const { addReport, findByDemandAndProduct: findReportsByDemandAndProduct } = useMatchReportStore();
 
   const [selectedDemandId, setSelectedDemandId] = useState<string>(demands[0]?.id ?? "");
   const [industry, setIndustry] = useState("");
@@ -97,6 +100,15 @@ export default function Matching() {
   const handleGenerateReport = (r: MatchResult) => {
     const result = calculateMatch(r.demand, r.product);
     const rep = generateMatchReport(r.demand, r.product, result);
+    addReport({
+      demandId: r.demandId,
+      productId: r.productId,
+      matchScore: rep.matchScore,
+      dimensionScores: rep.dimensionScores,
+      summary: rep.summary,
+      recommendations: rep.recommendations,
+      timelinessNote: rep.timelinessNote,
+    });
     setReport(rep);
     showToast("success", "撮合报告生成成功！");
   };
@@ -264,7 +276,14 @@ export default function Matching() {
                     <h3 className="font-display text-base text-ink-800 leading-tight line-clamp-2 group-hover:text-ink-900">
                       {r.product.name}
                     </h3>
-                    <span className={cn("w-2.5 h-2.5 rounded-full shrink-0 mt-1.5", scoreToBg(r.matchScore))} />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {findByDemandAndProduct(r.demandId, r.productId) && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-mint-500 text-white flex items-center gap-0.5">
+                          <Handshake size={9} /> 意向中
+                        </span>
+                      )}
+                      <span className={cn("w-2.5 h-2.5 rounded-full mt-1.5", scoreToBg(r.matchScore))} />
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-ink-400 mb-2">
                     <Building2 size={11} /> {r.product.providerCompany}
@@ -389,6 +408,72 @@ export default function Matching() {
                 </div>
               </div>
 
+              {/* 历史报告 */}
+              <div className="card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-display text-lg text-ink-800 flex items-center gap-2">
+                      <FileText size={18} className="text-mint-500" />
+                      历史报告
+                    </h3>
+                    <p className="text-xs text-ink-400 mt-0.5">该供需对的历史撮合报告记录</p>
+                  </div>
+                </div>
+
+                {findReportsByDemandAndProduct(selectedResult.demandId, selectedResult.productId).length === 0 ? (
+                  <div className="text-sm text-ink-400 text-center py-6">
+                    暂无历史报告
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-thin">
+                    {findReportsByDemandAndProduct(selectedResult.demandId, selectedResult.productId).map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between p-3 rounded-xl bg-ink-50/60 border border-ink-100 hover:bg-ink-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="relative w-10 h-10">
+                            <svg className="w-10 h-10 -rotate-90" viewBox="0 0 100 100">
+                              <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="8" fill="none" className="text-ink-100" />
+                              <circle
+                                cx="50" cy="50" r="42"
+                                stroke="currentColor"
+                                strokeWidth="8"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeDasharray={`${r.matchScore * 2.64} 264`}
+                                className={scoreToBg(r.matchScore).replace("bg-", "text-")}
+                              />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className={cn("text-xs font-bold", scoreToColor(r.matchScore))}>
+                                {r.matchScore}
+                              </span>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-ink-800">
+                              {r.matchScore}分 · 撮合报告
+                            </div>
+                            <div className="text-xs text-ink-400">
+                              {formatDateTime(r.createdAt)}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setReport(r);
+                          }}
+                          className="text-xs font-bold text-mint-600 hover:text-mint-700 px-3 py-1.5 rounded-lg bg-mint-50 hover:bg-mint-100 transition-all"
+                        >
+                          查看
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* 操作区 */}
               <div className="card p-5 flex flex-wrap items-center gap-3">
                 <button
@@ -398,29 +483,32 @@ export default function Matching() {
                   <Sparkles size={16} />
                   生成撮合报告
                 </button>
-                <button
-                  onClick={() => {
-                    const comm = findOrCreateByDemand(
-                      selectedResult.demandId,
-                      selectedResult.demand.title,
-                      selectedResult.productId,
-                      selectedResult.product.name,
-                      selectedResult.product.providerCompany
-                    );
-                    sendMessage({
-                      communicationId: comm.id,
-                      sender: "当前用户",
-                      senderRole: "operator",
-                      type: "intention",
-                      content: `针对需求「${selectedResult.demand.title}」与产品「${selectedResult.product.name}」发起撮合意向，匹配度 ${selectedResult.matchScore} 分`,
-                    });
-                    navigate("/communication");
-                  }}
-                  className="btn-outline"
-                >
-                  <Handshake size={16} />
-                  发起意向
-                </button>
+                {findByDemandAndProduct(selectedResult.demandId, selectedResult.productId) ? (
+                  <button
+                    onClick={() => navigate("/communication")}
+                    className="btn-outline"
+                  >
+                    <Eye size={16} />
+                    查看沟通
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      findOrCreateByDemandAndProduct(
+                        selectedResult.demandId,
+                        selectedResult.productId,
+                        selectedResult.demand.title,
+                        selectedResult.product.name,
+                        selectedResult.product.providerCompany
+                      );
+                      navigate("/communication");
+                    }}
+                    className="btn-outline"
+                  >
+                    <Handshake size={16} />
+                    发起意向
+                  </button>
+                )}
                 <button className="btn-outline">
                   <Share2 size={16} />
                   分享给供需双方
