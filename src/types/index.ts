@@ -2,7 +2,22 @@ export type DemandStatus = "pending" | "negotiating" | "signing" | "delivered" |
 
 export type UserRole = "demand" | "provider" | "operator";
 
-export type MessageType = "text" | "intention" | "question" | "material" | "minutes";
+export type MessageType = "text" | "intention" | "question" | "material" | "minutes" | "task";
+
+export type ReportConfirmStatus = "draft" | "pending_confirm" | "confirmed" | "rejected";
+
+export type TaskAssignee = "demand" | "provider" | "both";
+
+export interface CollabTask {
+  id: string;
+  communicationId: string;
+  title: string;
+  assignee: TaskAssignee;
+  status: "pending" | "done";
+  createdBy: string;
+  createdAt: string;
+  completedAt?: string;
+}
 
 export interface Demand {
   id: string;
@@ -121,6 +136,12 @@ export interface MatchReport {
   timelinessNote?: string;
   generatedBy: string;
   createdAt: string;
+  confirmStatus: ReportConfirmStatus;
+  demandConfirm?: "confirmed" | "rejected";
+  providerConfirm?: "confirmed" | "rejected";
+  confirmedAt?: string;
+  rejectedAt?: string;
+  rejectReason?: string;
 }
 
 export interface TrendDataPoint {

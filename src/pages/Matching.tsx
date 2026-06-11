@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   SlidersHorizontal,
@@ -22,6 +22,8 @@ import {
   Lightbulb,
   Handshake,
   Eye,
+  Send,
+  XCircle,
 } from "lucide-react";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useProductStore } from "@/store/useProductStore";
@@ -30,8 +32,8 @@ import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { useMatchReportStore } from "@/store/useMatchReportStore";
 import { MatchScoreRing } from "@/components/MatchScoreRing";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { MatchReport, MatchResult } from "@/types";
-import { INDUSTRIES, REGIONS, UPDATE_FREQUENCIES, PRICE_RANGES } from "@/utils/constants";
+import type { MatchReport, MatchResult, ReportConfirmStatus } from "@/types";
+import { INDUSTRIES, REGIONS, UPDATE_FREQUENCIES, PRICE_RANGES, REPORT_CONFIRM_META } from "@/utils/constants";
 import { calculateMatch, generateMatchReport } from "@/utils/matchEngine";
 import { formatCurrency, cn, scoreToBg, scoreToColor, formatDateTime } from "@/utils/formatters";
 
@@ -44,8 +46,8 @@ export default function Matching() {
   const products = useProductStore((s) => s.products);
   const showToast = useUiStore((s) => s.showToast);
   const navigate = useNavigate();
-  const { findOrCreateByDemandAndProduct, findByDemandAndProduct } = useCommunicationStore();
-  const { addReport, findByDemandAndProduct: findReportsByDemandAndProduct } = useMatchReportStore();
+  const { findOrCreateByDemandAndProduct, findByDemandAndProduct, setActive } = useCommunicationStore();
+  const { addReport, findByDemandAndProduct: findReportsByDemandAndProduct, pushForConfirm, confirmReport, rejectReport } = useMatchReportStore();
 
   const [selectedDemandId, setSelectedDemandId] = useState<string>(demands[0]?.id ?? "");
   const [industry, setIndustry] = useState("");
@@ -55,6 +57,8 @@ export default function Matching() {
   const [minScore, setMinScore] = useState(0);
   const [showDemandPicker, setShowDemandPicker] = useState(false);
   const [report, setReport] = useState<MatchReport | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectingRole, setRejectingRole] = useState<"demand" | "provider" | null>(null);
 
   const selectedDemand = demands.find((d) => d.id === selectedDemandId);
 
@@ -95,7 +99,15 @@ export default function Matching() {
     };
   }, [results]);
 
-  const selectedResult = useMemo(() => results[0], [results]);
+  const [selectedResult, setSelectedResult] = useState<MatchResult | null>(null);
+
+  useEffect(() => {
+    if (results.length > 0) {
+      setSelectedResult((prev) => (prev && results.some((r) => r.id === prev.id) ? prev : results[0]));
+    } else {
+      setSelectedResult(null);
+    }
+  }, [results]);
 
   const handleGenerateReport = (r: MatchResult) => {
     const result = calculateMatch(r.demand, r.product);
@@ -109,7 +121,7 @@ export default function Matching() {
       recommendations: rep.recommendations,
       timelinessNote: rep.timelinessNote,
     });
-    setReport(rep);
+    setReport({ ...rep, confirmStatus: "draft" });
     showToast("success", "撮合报告生成成功！");
   };
 
@@ -262,10 +274,10 @@ export default function Matching() {
               <div
                 key={r.id}
                 style={{ animationDelay: `${idx * 30}ms` }}
-                onClick={() => console.log(r)}
+                onClick={() => setSelectedResult(r)}
                 className={cn(
                   "w-full card p-4 text-left animate-fadeUp transition-all flex items-start gap-4 group",
-                  idx === 0
+                  selectedResult?.id === r.id
                     ? "ring-2 ring-mint-400/40 shadow-cardHover -translate-y-0.5"
                     : "hover:shadow-cardHover hover:-translate-y-0.5"
                 )}
@@ -485,7 +497,11 @@ export default function Matching() {
                 </button>
                 {findByDemandAndProduct(selectedResult.demandId, selectedResult.productId) ? (
                   <button
-                    onClick={() => navigate("/communication")}
+                    onClick={() => {
+                      const comm = findByDemandAndProduct(selectedResult.demandId, selectedResult.productId);
+                      if (comm) setActive(comm.id);
+                      navigate("/communication");
+                    }}
                     className="btn-outline"
                   >
                     <Eye size={16} />
@@ -494,13 +510,14 @@ export default function Matching() {
                 ) : (
                   <button
                     onClick={() => {
-                      findOrCreateByDemandAndProduct(
+                      const comm = findOrCreateByDemandAndProduct(
                         selectedResult.demandId,
                         selectedResult.productId,
                         selectedResult.demand.title,
                         selectedResult.product.name,
                         selectedResult.product.providerCompany
                       );
+                      setActive(comm.id);
                       navigate("/communication");
                     }}
                     className="btn-outline"
@@ -549,7 +566,12 @@ export default function Matching() {
                   <FileText size={18} className="text-ink-900" />
                 </div>
                 <div>
-                  <h2 className="font-display text-xl text-ink-800">撮合分析报告</h2>
+                  <h2 className="font-display text-xl text-ink-800 flex items-center gap-2">
+                    撮合分析报告
+                    <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full", REPORT_CONFIRM_META[report.confirmStatus].color, REPORT_CONFIRM_META[report.confirmStatus].bg)}>
+                      {REPORT_CONFIRM_META[report.confirmStatus].label}
+                    </span>
+                  </h2>
                   <div className="text-xs text-ink-400">
                     报告编号 {report.id} · 生成于 {report.generatedBy}
                   </div>
@@ -636,6 +658,116 @@ export default function Matching() {
                   ))}
                 </ol>
               </div>
+
+              <div className="mt-4 p-3 rounded-lg bg-ink-50/50 space-y-1">
+                <p className="text-xs font-semibold text-ink-500 uppercase tracking-wider">确认记录</p>
+                <p className="text-xs text-ink-600">需求方：{report.demandConfirm === "confirmed" ? "✓ 已确认" : report.demandConfirm === "rejected" ? "✗ 已退回" : "未确认"}</p>
+                <p className="text-xs text-ink-600">提供方：{report.providerConfirm === "confirmed" ? "✓ 已确认" : report.providerConfirm === "rejected" ? "✗ 已退回" : "未确认"}</p>
+                {report.confirmedAt && <p className="text-xs text-ink-400">确认时间：{formatDateTime(report.confirmedAt)}</p>}
+                {report.rejectedAt && <p className="text-xs text-ink-400">退回时间：{formatDateTime(report.rejectedAt)}</p>}
+                {report.rejectReason && <p className="text-xs text-red-500">退回原因：{report.rejectReason}</p>}
+              </div>
+
+              {report.confirmStatus === "draft" && (
+                <button
+                  onClick={() => pushForConfirm(report.id)}
+                  className="btn-mint w-full"
+                >
+                  <Send size={16} /> 推送给供需双方确认
+                </button>
+              )}
+
+              {report.confirmStatus === "pending_confirm" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => confirmReport(report.id, "demand")}
+                      className="btn-mint flex-1"
+                    >
+                      <CheckCircle2 size={16} /> 需求方确认
+                    </button>
+                    {rejectingRole === "demand" ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="退回原因"
+                          className="input !py-1.5 text-xs flex-1"
+                        />
+                        <button
+                          onClick={() => { rejectReport(report.id, "demand", rejectReason || undefined); setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-outline !py-1.5 text-xs"
+                        >
+                          确定
+                        </button>
+                        <button
+                          onClick={() => { setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-ghost !px-2 !py-1.5 text-xs"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRejectingRole("demand")}
+                        className="btn-outline flex-1 !border-red-200 !text-red-600 hover:!bg-red-50"
+                      >
+                        <XCircle size={16} /> 需求方退回
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => confirmReport(report.id, "provider")}
+                      className="btn-mint flex-1"
+                    >
+                      <CheckCircle2 size={16} /> 提供方确认
+                    </button>
+                    {rejectingRole === "provider" ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="退回原因"
+                          className="input !py-1.5 text-xs flex-1"
+                        />
+                        <button
+                          onClick={() => { rejectReport(report.id, "provider", rejectReason || undefined); setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-outline !py-1.5 text-xs"
+                        >
+                          确定
+                        </button>
+                        <button
+                          onClick={() => { setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-ghost !px-2 !py-1.5 text-xs"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRejectingRole("provider")}
+                        className="btn-outline flex-1 !border-red-200 !text-red-600 hover:!bg-red-50"
+                      >
+                        <XCircle size={16} /> 提供方退回
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {report.confirmStatus === "confirmed" && report.confirmedAt && (
+                <div className="text-center text-xs text-emerald-600 p-3 rounded-lg bg-emerald-50">
+                  <CheckCircle2 size={16} className="inline mr-1" /> 已于 {formatDateTime(report.confirmedAt)} 确认
+                </div>
+              )}
+
+              {report.confirmStatus === "rejected" && (
+                <div className="text-center p-3 rounded-lg bg-red-50 space-y-1">
+                  <p className="text-xs text-red-600"><XCircle size={16} className="inline mr-1" /> 已退回 · {report.rejectedAt && formatDateTime(report.rejectedAt)}</p>
+                  {report.rejectReason && <p className="text-xs text-red-500">退回原因：{report.rejectReason}</p>}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-3 p-5 border-t border-ink-100">

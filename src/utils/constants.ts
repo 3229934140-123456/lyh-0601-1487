@@ -1,4 +1,4 @@
-import type { UserRole, DemandStatus, MessageType } from "@/types";
+import type { UserRole, DemandStatus, MessageType, ReportConfirmStatus } from "@/types";
 
 export const INDUSTRIES = [
   "金融银行",
@@ -73,6 +73,20 @@ export const MESSAGE_TYPE_META: Record<
   question: { label: "问题", icon: "help-circle", color: "text-amber-600" },
   material: { label: "材料", icon: "file-text", color: "text-blue-600" },
   minutes: { label: "会议纪要", icon: "calendar-check", color: "text-purple-600" },
+  task: { label: "协作任务", icon: "list-checks", color: "text-emerald-600" },
+};
+
+export const REPORT_CONFIRM_META: Record<ReportConfirmStatus, { label: string; color: string; bg: string }> = {
+  draft: { label: "草稿", color: "text-slate-600", bg: "bg-slate-100" },
+  pending_confirm: { label: "待确认", color: "text-amber-600", bg: "bg-amber-50" },
+  confirmed: { label: "已确认", color: "text-emerald-600", bg: "bg-emerald-50" },
+  rejected: { label: "已退回", color: "text-red-600", bg: "bg-red-50" },
+};
+
+export const TASK_ASSIGNEE_META: Record<string, { label: string; color: string }> = {
+  demand: { label: "需求方", color: "text-blue-600" },
+  provider: { label: "提供方", color: "text-orange-600" },
+  both: { label: "双方", color: "text-purple-600" },
 };
 
 export const PRICE_RANGES = [

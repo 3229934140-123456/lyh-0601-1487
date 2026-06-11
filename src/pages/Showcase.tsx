@@ -25,14 +25,16 @@ import {
   Lightbulb,
   Target,
   Clock,
+  Send,
+  XCircle,
 } from "lucide-react";
 import { useProductStore } from "@/store/useProductStore";
 import { useDemandStore } from "@/store/useDemandStore";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
 import { useMatchReportStore } from "@/store/useMatchReportStore";
 import { useUiStore } from "@/store/useUiStore";
-import type { Product, MatchReport } from "@/types";
-import { INDUSTRIES, REGIONS, DELIVERY_FORMS, UPDATE_FREQUENCIES, PRICE_RANGES } from "@/utils/constants";
+import type { Product, MatchReport, ReportConfirmStatus } from "@/types";
+import { INDUSTRIES, REGIONS, DELIVERY_FORMS, UPDATE_FREQUENCIES, PRICE_RANGES, REPORT_CONFIRM_META } from "@/utils/constants";
 import { formatCurrency, cn, scoreToColor, formatDateTime, scoreToBg } from "@/utils/formatters";
 import { loadJson, saveJson } from "@/utils/storage";
 
@@ -69,8 +71,9 @@ export default function Showcase() {
   const findOrCreateByDemandAndProduct = useCommunicationStore((s) => s.findOrCreateByDemandAndProduct);
   const findByProduct = useCommunicationStore((s) => s.findByProduct);
   const findByDemandAndProduct = useCommunicationStore((s) => s.findByDemandAndProduct);
+  const setActive = useCommunicationStore((s) => s.setActive);
   const communications = useCommunicationStore((s) => s.communications);
-  const { findByProduct: findReportsByProduct, getById: getReportById } = useMatchReportStore();
+  const { findByProduct: findReportsByProduct, getById: getReportById, pushForConfirm, confirmReport, rejectReport } = useMatchReportStore();
   const navigate = useNavigate();
 
   const [keyword, setKeyword] = useState("");
@@ -91,6 +94,8 @@ export default function Showcase() {
 
   const [selectedReport, setSelectedReport] = useState<MatchReport | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectingRole, setRejectingRole] = useState<"demand" | "provider" | null>(null);
 
   const filtered = useMemo(() => {
     const pr = PRICE_RANGES[priceIdx];
@@ -117,6 +122,13 @@ export default function Showcase() {
 
   const openDemands = demands.filter((d) => d.status !== "closed");
 
+  const existingComm = useMemo(
+    () => intentionProduct && intentionForm.demandId
+      ? findByDemandAndProduct(intentionForm.demandId, intentionProduct.id)
+      : undefined,
+    [intentionForm.demandId, intentionProduct, findByDemandAndProduct]
+  );
+
   useEffect(() => {
     const draft = loadJson("productDraft", null as any);
     if (draft) {
@@ -140,17 +152,21 @@ export default function Showcase() {
     if (!intentionProduct || !intentionForm.demandId) return;
     const demand = demands.find((d) => d.id === intentionForm.demandId);
     if (!demand) return;
-    findOrCreateByDemandAndProduct(
-      demand.id,
-      intentionProduct.id,
-      demand.title,
-      intentionProduct.name,
-      intentionProduct.providerCompany,
-      intentionForm.note || undefined
-    );
+    if (existingComm) {
+      setActive(existingComm.id);
+      navigate("/communication");
+    } else {
+      findOrCreateByDemandAndProduct(
+        demand.id,
+        intentionProduct.id,
+        demand.title,
+        intentionProduct.name,
+        intentionProduct.providerCompany,
+        intentionForm.note || undefined
+      );
+    }
     setShowIntentionModal(false);
     setSelected(null);
-    navigate("/communication");
   };
 
   const toggleDeliveryForm = (form: string) => {
@@ -645,10 +661,22 @@ export default function Showcase() {
                   className="input"
                 >
                   <option value="">请选择需求</option>
-                  {openDemands.map((d) => (
-                    <option key={d.id} value={d.id}>{d.title}</option>
-                  ))}
+                  {openDemands.map((d) => {
+                    const commExists = findByDemandAndProduct(d.id, intentionProduct?.id || "");
+                    return (
+                      <option key={d.id} value={d.id}>
+                        {d.title}{commExists ? " (已沟通)" : ""}
+                      </option>
+                    );
+                  })}
                 </select>
+                {intentionForm.demandId && (() => {
+                  const selDemand = openDemands.find((d) => d.id === intentionForm.demandId);
+                  const commExists = selDemand ? findByDemandAndProduct(selDemand.id, intentionProduct?.id || "") : undefined;
+                  return commExists ? (
+                    <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded ml-1">已沟通</span>
+                  ) : null;
+                })()}
                 {openDemands.length === 0 && (
                   <p className="text-xs text-ink-400">暂无可关联的需求，请先发布需求</p>
                 )}
@@ -690,8 +718,7 @@ export default function Showcase() {
                 disabled={!intentionForm.demandId}
                 className={cn("btn-primary", !intentionForm.demandId && "opacity-50 cursor-not-allowed")}
               >
-                <Handshake size={16} />
-                确认发起
+                {existingComm ? <><Eye size={16} /> 查看沟通</> : <><Handshake size={16} /> 发起意向</>}
               </button>
             </div>
           </div>
@@ -713,7 +740,12 @@ export default function Showcase() {
                   <FileText size={18} className="text-ink-900" />
                 </div>
                 <div>
-                  <h2 className="font-display text-xl text-ink-800">撮合分析报告</h2>
+                  <h2 className="font-display text-xl text-ink-800 flex items-center gap-2">
+                    撮合分析报告
+                    <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full", REPORT_CONFIRM_META[selectedReport.confirmStatus].color, REPORT_CONFIRM_META[selectedReport.confirmStatus].bg)}>
+                      {REPORT_CONFIRM_META[selectedReport.confirmStatus].label}
+                    </span>
+                  </h2>
                   <div className="text-xs text-ink-400">
                     报告编号 {selectedReport.id} · 生成于 {selectedReport.generatedBy}
                   </div>
@@ -822,6 +854,116 @@ export default function Showcase() {
                   ))}
                 </ol>
               </div>
+
+              <div className="mt-4 p-3 rounded-lg bg-ink-50/50 space-y-1">
+                <p className="text-xs font-semibold text-ink-500 uppercase tracking-wider">确认记录</p>
+                <p className="text-xs text-ink-600">需求方：{selectedReport.demandConfirm === "confirmed" ? "✓ 已确认" : selectedReport.demandConfirm === "rejected" ? "✗ 已退回" : "未确认"}</p>
+                <p className="text-xs text-ink-600">提供方：{selectedReport.providerConfirm === "confirmed" ? "✓ 已确认" : selectedReport.providerConfirm === "rejected" ? "✗ 已退回" : "未确认"}</p>
+                {selectedReport.confirmedAt && <p className="text-xs text-ink-400">确认时间：{formatDateTime(selectedReport.confirmedAt)}</p>}
+                {selectedReport.rejectedAt && <p className="text-xs text-ink-400">退回时间：{formatDateTime(selectedReport.rejectedAt)}</p>}
+                {selectedReport.rejectReason && <p className="text-xs text-red-500">退回原因：{selectedReport.rejectReason}</p>}
+              </div>
+
+              {selectedReport.confirmStatus === "draft" && (
+                <button
+                  onClick={() => pushForConfirm(selectedReport.id)}
+                  className="btn-mint w-full"
+                >
+                  <Send size={16} /> 推送给供需双方确认
+                </button>
+              )}
+
+              {selectedReport.confirmStatus === "pending_confirm" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => confirmReport(selectedReport.id, "demand")}
+                      className="btn-mint flex-1"
+                    >
+                      <CheckCircle2 size={16} /> 需求方确认
+                    </button>
+                    {rejectingRole === "demand" ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="退回原因"
+                          className="input !py-1.5 text-xs flex-1"
+                        />
+                        <button
+                          onClick={() => { rejectReport(selectedReport.id, "demand", rejectReason || undefined); setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-outline !py-1.5 text-xs"
+                        >
+                          确定
+                        </button>
+                        <button
+                          onClick={() => { setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-ghost !px-2 !py-1.5 text-xs"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRejectingRole("demand")}
+                        className="btn-outline flex-1 !border-red-200 !text-red-600 hover:!bg-red-50"
+                      >
+                        <XCircle size={16} /> 需求方退回
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => confirmReport(selectedReport.id, "provider")}
+                      className="btn-mint flex-1"
+                    >
+                      <CheckCircle2 size={16} /> 提供方确认
+                    </button>
+                    {rejectingRole === "provider" ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="退回原因"
+                          className="input !py-1.5 text-xs flex-1"
+                        />
+                        <button
+                          onClick={() => { rejectReport(selectedReport.id, "provider", rejectReason || undefined); setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-outline !py-1.5 text-xs"
+                        >
+                          确定
+                        </button>
+                        <button
+                          onClick={() => { setRejectingRole(null); setRejectReason(""); }}
+                          className="btn-ghost !px-2 !py-1.5 text-xs"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRejectingRole("provider")}
+                        className="btn-outline flex-1 !border-red-200 !text-red-600 hover:!bg-red-50"
+                      >
+                        <XCircle size={16} /> 提供方退回
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedReport.confirmStatus === "confirmed" && selectedReport.confirmedAt && (
+                <div className="text-center text-xs text-emerald-600 p-3 rounded-lg bg-emerald-50">
+                  <CheckCircle2 size={16} className="inline mr-1" /> 已于 {formatDateTime(selectedReport.confirmedAt)} 确认
+                </div>
+              )}
+
+              {selectedReport.confirmStatus === "rejected" && (
+                <div className="text-center p-3 rounded-lg bg-red-50 space-y-1">
+                  <p className="text-xs text-red-600"><XCircle size={16} className="inline mr-1" /> 已退回 · {selectedReport.rejectedAt && formatDateTime(selectedReport.rejectedAt)}</p>
+                  {selectedReport.rejectReason && <p className="text-xs text-red-500">退回原因：{selectedReport.rejectReason}</p>}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-3 p-5 border-t border-ink-100">
@@ -1150,10 +1292,10 @@ function ProductDetail({
           {hasIntention ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold px-3 py-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1.5">
-                <CheckCircle2 size={14} /> 已发起意向
+                <CheckCircle2 size={14} /> 已有意向
               </span>
-              <button onClick={onViewCommunication} className="btn-mint">
-                <Eye size={16} /> 查看沟通
+              <button onClick={onIntention} className="btn-mint">
+                <Handshake size={16} /> 采购意向
               </button>
             </div>
           ) : (

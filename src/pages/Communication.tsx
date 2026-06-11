@@ -14,15 +14,21 @@ import {
   Download,
   Check,
   ChevronRight,
+  ChevronDown,
   User,
   Shield,
   Building2,
+  CheckCircle2,
+  Circle,
+  ListChecks,
+  RotateCcw,
 } from "lucide-react";
 import { useCommunicationStore } from "@/store/useCommunicationStore";
+import { useCollabTaskStore } from "@/store/useCollabTaskStore";
 import { useUiStore } from "@/store/useUiStore";
-import type { Message, MessageType, UserRole, DemandStatus } from "@/types";
+import type { Message, MessageType, UserRole, DemandStatus, CollabTask, TaskAssignee } from "@/types";
 import { StatusBadge } from "@/components/StatusBadge";
-import { DEMAND_STATUS_META, MESSAGE_TYPE_META, DEMAND_STATUS_FLOW } from "@/utils/constants";
+import { DEMAND_STATUS_META, MESSAGE_TYPE_META, DEMAND_STATUS_FLOW, TASK_ASSIGNEE_META } from "@/utils/constants";
 import { formatDateTime, cn } from "@/utils/formatters";
 
 const TYPE_FILTERS: (MessageType | "all")[] = ["all", "intention", "question", "material", "minutes"];
@@ -44,6 +50,11 @@ export default function Communication() {
   const showToast = useUiStore((s) => s.showToast);
   const role = useUiStore((s) => s.role);
 
+  const tasks = useCollabTaskStore((s) => s.tasks);
+  const addTask = useCollabTaskStore((s) => s.addTask);
+  const completeTask = useCollabTaskStore((s) => s.completeTask);
+  const reopenTask = useCollabTaskStore((s) => s.reopenTask);
+
   const active = useMemo(
     () => communications.find((c) => c.id === activeId),
     [communications, activeId]
@@ -59,11 +70,20 @@ export default function Communication() {
   const [typeFilter, setTypeFilter] = useState<MessageType | "all">("all");
   const [quickType, setQuickType] = useState<MessageType>("text");
   const [input, setInput] = useState("");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskAssignee, setNewTaskAssignee] = useState<TaskAssignee>("demand");
+  const [showTaskArea, setShowTaskArea] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const filteredMessages = activeMessages.filter((m) =>
     typeFilter === "all" ? true : m.type === typeFilter
   );
+
+  const activeTasks = useMemo(
+    () => (activeId ? tasks.filter((t) => t.communicationId === activeId) : []),
+    [tasks, activeId]
+  );
+  const pendingTaskCount = activeTasks.filter((t) => t.status === "pending").length;
 
   const totalUnread = communications.reduce((sum, c) => sum + c.unreadCount, 0);
 
@@ -312,6 +332,81 @@ export default function Communication() {
                 </div>
               </div>
             </div>
+
+            {active && (
+              <div className="border border-ink-100 rounded-xl mb-4 overflow-hidden">
+                <button
+                  onClick={() => setShowTaskArea(!showTaskArea)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-emerald-50/60 to-white hover:from-emerald-50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <ListChecks size={16} className="text-emerald-600" />
+                    <span className="text-sm font-semibold text-ink-700">协作任务</span>
+                    {pendingTaskCount > 0 && (
+                      <span className="text-[11px] font-bold bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5">{pendingTaskCount} 待办</span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={cn("text-ink-400 transition-transform", showTaskArea && "rotate-180")} />
+                </button>
+                {showTaskArea && (
+                  <div className="p-4 space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        value={newTaskTitle}
+                        onChange={(e) => setNewTaskTitle(e.target.value)}
+                        placeholder="输入任务标题，如：补充营业执照扫描件..."
+                        className="input flex-1 text-sm"
+                      />
+                      <select
+                        value={newTaskAssignee}
+                        onChange={(e) => setNewTaskAssignee(e.target.value as TaskAssignee)}
+                        className="input text-sm w-24"
+                      >
+                        <option value="demand">需求方</option>
+                        <option value="provider">提供方</option>
+                        <option value="both">双方</option>
+                      </select>
+                      <button
+                        disabled={!newTaskTitle.trim()}
+                        onClick={() => {
+                          addTask({ communicationId: active.id, title: newTaskTitle.trim(), assignee: newTaskAssignee, createdBy: "平台运营" });
+                          sendMessage({ communicationId: active.id, sender: "平台运营", senderRole: "operator", type: "task", content: `【协作任务】${TASK_ASSIGNEE_META[newTaskAssignee].label}：${newTaskTitle.trim()}` });
+                          setNewTaskTitle("");
+                        }}
+                        className="btn-mint text-sm"
+                      >
+                        <Plus size={14} /> 派发
+                      </button>
+                    </div>
+                    {activeTasks.length === 0 ? (
+                      <p className="text-xs text-ink-400 text-center py-4">暂无协作任务</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {activeTasks.map((task) => (
+                          <div key={task.id} className={cn("flex items-start gap-3 p-3 rounded-lg border", task.status === "done" ? "bg-emerald-50/40 border-emerald-100" : "bg-white border-ink-100")}>
+                            <button onClick={() => task.status === "done" ? reopenTask(task.id) : completeTask(task.id)} className="mt-0.5 flex-shrink-0">
+                              {task.status === "done" ? <CheckCircle2 size={18} className="text-emerald-500" /> : <Circle size={18} className="text-ink-300 hover:text-emerald-400" />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <p className={cn("text-sm", task.status === "done" && "line-through text-ink-400")}>{task.title}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className={cn("text-[11px] font-medium px-1.5 py-0.5 rounded", TASK_ASSIGNEE_META[task.assignee]?.color || "text-ink-500", "bg-ink-50")}>{TASK_ASSIGNEE_META[task.assignee]?.label || task.assignee}</span>
+                                <span className="text-[11px] text-ink-400">{task.status === "done" && task.completedAt ? `完成于 ${formatDateTime(task.completedAt)}` : `创建于 ${formatDateTime(task.createdAt)}`}</span>
+                              </div>
+                            </div>
+                            {task.status === "done" && (
+                              <button onClick={() => reopenTask(task.id)} className="text-ink-400 hover:text-ink-600" title="重新打开">
+                                <RotateCcw size={14} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 消息时间线 */}
             <div
